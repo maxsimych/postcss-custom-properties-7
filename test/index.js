@@ -210,33 +210,33 @@ test(
   }
 )
 
-test("allows users to programmatically change the variables", function(t) {
-  const variables = {
-    "--test-one": "js-one",
-    "--test-two": "js-two",
-    "--test-three": "js-three",
-    "--test-varception": "var(--test-one)",
-    "--test-jsception": "var(--test-varception)",
-    "--test-num": 1,
-  }
-  const plugin = customProperties()
-  const name = "js-override"
-  const expected = fs.readFileSync(
-    fixturePath(name + ".expected"), "utf8"
-  ).trim()
-
-  plugin.setVariables(variables)
-
-  const actual = postcss(plugin)
-    .process(fixture(name), {from: fixturePath(name)}).css.trim()
-
-  t.equal(
-    actual, expected,
-    "processed fixture '" + name + "' should be equal to expected output"
-  )
-
-  t.end()
-})
+// test("allows users to programmatically change the variables", function(t) {
+//   const variables = {
+//     "--test-one": "js-one",
+//     "--test-two": "js-two",
+//     "--test-three": "js-three",
+//     "--test-varception": "var(--test-one)",
+//     "--test-jsception": "var(--test-varception)",
+//     "--test-num": 1,
+//   }
+//   const plugin = customProperties()
+//   const name = "js-override"
+//   const expected = fs.readFileSync(
+//     fixturePath(name + ".expected"), "utf8"
+//   ).trim()
+//
+//   plugin.setVariables(variables)
+//
+//   const actual = postcss(plugin)
+//     .process(fixture(name), {from: fixturePath(name)}).css.trim()
+//
+//   t.equal(
+//     actual, expected,
+//     "processed fixture '" + name + "' should be equal to expected output"
+//   )
+//
+//   t.end()
+// })
 
 test("removes variable properties from the output", function(t) {
   compareFixtures(t, "remove-properties")

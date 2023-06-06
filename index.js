@@ -176,172 +176,168 @@ function assert(ruleName, condition, message, {
   }
 }
 
-/**
- * Module export.
- */
-export default postcss.plugin("postcss-custom-properties", (options = {}) => {
+const plugin = (options = {}) => {
+  return {
+    postcssPlugin: "postcss-custom-properties-7",
+    Once(root, {result}) {
+      const variables = prefixVariables(options.variables)
+      const strict = "strict" in options ? Boolean(options.strict) : true
+      const appendVariables = "appendVariables" in options
+        ? Boolean(options.appendVariables) : false
+      const preserve = "preserve" in options ? options.preserve : true
+      const map = {}
+      const importantMap = {}
 
-  function setVariables(variables) {
-    options.variables = prefixVariables(variables)
-  }
+      globalOpts = {
+        warnings: options.warnings,
+      }
 
-  function plugin(style, result) {
-    const variables = prefixVariables(options.variables)
-    const strict = "strict" in options ? Boolean(options.strict) : true
-    const appendVariables = "appendVariables" in options
-      ? Boolean(options.appendVariables) : false
-    const preserve = "preserve" in options ? options.preserve : true
-    const map = {}
-    const importantMap = {}
-
-    globalOpts = {
-      warnings: options.warnings,
-    }
-
-    if ("noValueNotifications" in options) {
-      result.warn(
-        "'noValueNotifications' is deprecated. Use "
+      if ("noValueNotifications" in options) {
+        result.warn(
+          "'noValueNotifications' is deprecated. Use "
           + "\"options.warnings['no-value-notifications']: true|false|'error'\""
           + "instead."
-      )
+        )
 
-      if (typeof globalOpts.warnings === "object") {
-        globalOpts.warnings["no-value-notifications"] =
-          options.noValueNotifications === "error" ? "error" : true
-      }
-      else if (globalOpts.warnings === true
-               && options.noValueNotifications === "error") {
-        globalOpts.warnings = {
-          "no-value-notifications": "error",
-          "not-scoped-to-root": true,
-          "circular-reference": true,
+        if (typeof globalOpts.warnings === "object") {
+          globalOpts.warnings["no-value-notifications"] =
+            options.noValueNotifications === "error" ? "error" : true
+        }
+        else if (globalOpts.warnings === true
+          && options.noValueNotifications === "error") {
+          globalOpts.warnings = {
+            "no-value-notifications": "error",
+            "not-scoped-to-root": true,
+            "circular-reference": true,
+          }
         }
       }
-    }
 
-    // define variables
-    style.walkRules((rule) => {
-      const toRemove = []
+      // define variables
+      root.walkRules((rule) => {
+        const toRemove = []
 
-      // only variables declared for `:root` are supported for now
-      if (
-        rule.selectors.length !== 1 ||
-        rule.selectors[0] !== ":root" ||
-        rule.parent.type !== "root"
-      ) {
-        rule.each((decl) => {
-          const prop = decl.prop
-          assert(
-            "not-scoped-to-root",
-            !prop || prop.indexOf(VAR_PROP_IDENTIFIER) !== 0,
-            "Custom property ignored: not scoped to the top-level :root " +
+        // only variables declared for `:root` are supported for now
+        if (
+          rule.selectors.length !== 1 ||
+          rule.selectors[0] !== ":root" ||
+          rule.parent.type !== "root"
+        ) {
+          rule.each((decl) => {
+            const prop = decl.prop
+            assert(
+              "not-scoped-to-root",
+              !prop || prop.indexOf(VAR_PROP_IDENTIFIER) !== 0,
+              "Custom property ignored: not scoped to the top-level :root " +
               `element (${rule.selectors} { ... ${prop}: ... })` +
               (rule.parent.type !== "root" ? ", in " + rule.parent.type : ""),
-            {decl, result}
-          )
-        })
-        return
-      }
+              {decl, result}
+            )
 
-      rule.each((decl, index) => {
-        const prop = decl.prop
-        if (prop && prop.indexOf(VAR_PROP_IDENTIFIER) === 0) {
-          if (!map[prop] || !importantMap[prop] || decl.important) {
-            map[prop] = {
-              value: decl.value,
-              deps: [],
-              circular: false,
-              resolved: false,
-            }
-            importantMap[prop] = decl.important
-          }
-          toRemove.push(index)
-        }
-      })
-
-      // optionally remove `--*` properties from the rule
-      if (!preserve) {
-        for (let i = toRemove.length - 1; i >= 0; i--) {
-          rule.nodes.splice(toRemove[i], 1)
-        }
-
-        // remove empty :root {}
-        if (rule.nodes.length === 0) {
-          rule.remove()
-        }
-      }
-    })
-
-    // apply js-defined custom properties
-    Object.keys(variables).forEach((variable) => {
-      map[variable] = {
-        value: variables[variable],
-        deps: [],
-        circular: false,
-        resolved: false,
-      }
-    })
-
-    if (preserve) {
-      Object.keys(map).forEach((name) => {
-        const variable = map[name]
-        if (!variable.resolved) {
-          variable.value = resolveValue(variable.value, map, result)
-          variable.resolved = true
-        }
-      })
-    }
-
-    // resolve variables
-    style.walkDecls((decl) => {
-      const value = decl.raws.value ? decl.raws.value.raw : decl.value
-
-      // skip values that don’t contain variable functions
-      if (!value || value.indexOf(VAR_FUNC_IDENTIFIER + "(") === -1) {
-        return
-      }
-
-      let resolved = resolveValue(value, map, result, decl)
-      if (!strict) {
-        resolved = [resolved.pop()]
-      }
-      resolved.forEach((resolvedValue) => {
-        const clone = decl.cloneBefore()
-        clone.value = resolvedValue
-      })
-
-      if (!preserve || preserve === "computed") {
-        decl.remove()
-      }
-    })
-
-    if (preserve && variables && appendVariables) {
-      const names = Object.keys(map)
-      if (names.length) {
-        const container = postcss.rule({
-          selector: ":root",
-          raws: {semicolon: true},
-        })
-        names
-          .filter((name) => variables.hasOwnProperty(name))
-          .forEach((name) => {
-            const variable = map[name]
-            let val = variable.value
-            if (variable.resolved) {
-              val = val[val.length - 1]
-            }
-            const decl = postcss.decl({
-              prop: name,
-              value: val,
-            })
-            container.append(decl)
           })
-        style.append(container)
+          return
+        }
+
+        rule.each((decl, index) => {
+          const prop = decl.prop
+          if (prop && prop.indexOf(VAR_PROP_IDENTIFIER) === 0) {
+            if (!map[prop] || !importantMap[prop] || decl.important) {
+              map[prop] = {
+                value: decl.value,
+                deps: [],
+                circular: false,
+                resolved: false,
+              }
+              importantMap[prop] = decl.important
+            }
+            toRemove.push(index)
+          }
+        })
+
+        // optionally remove `--*` properties from the rule
+        if (!preserve) {
+          for (let i = toRemove.length - 1; i >= 0; i--) {
+            rule.nodes.splice(toRemove[i], 1)
+          }
+
+          // remove empty :root {}
+          if (rule.nodes.length === 0) {
+            rule.remove()
+          }
+        }
+      })
+
+      // apply js-defined custom properties
+      Object.keys(variables).forEach((variable) => {
+        map[variable] = {
+          value: variables[variable],
+          deps: [],
+          circular: false,
+          resolved: false,
+        }
+      })
+
+      if (preserve) {
+        Object.keys(map).forEach((name) => {
+          const variable = map[name]
+          if (!variable.resolved) {
+            variable.value = resolveValue(variable.value, map, result)
+            variable.resolved = true
+          }
+        })
       }
-    }
+
+      // resolve variables
+      root.walkDecls((decl) => {
+        const value = decl.raws.value ? decl.raws.value.raw : decl.value
+
+        // skip values that don’t contain variable functions
+        if (!value || value.indexOf(VAR_FUNC_IDENTIFIER + "(") === -1) {
+          return
+        }
+
+        let resolved = resolveValue(value, map, result, decl)
+        if (!strict) {
+          resolved = [resolved.pop()]
+        }
+        resolved.forEach((resolvedValue) => {
+          const clone = decl.cloneBefore()
+          clone.value = resolvedValue
+        })
+
+        if (!preserve || preserve === "computed") {
+          decl.remove()
+        }
+      })
+
+      if (preserve && variables && appendVariables) {
+        const names = Object.keys(map)
+        if (names.length) {
+          const container = postcss.rule({
+            selector: ":root",
+            raws: {semicolon: true},
+          })
+          names
+            .filter((name) => variables.hasOwnProperty(name))
+            .forEach((name) => {
+              const variable = map[name]
+              let val = variable.value
+              if (variable.resolved) {
+                val = val[val.length - 1]
+              }
+              const decl = postcss.decl({
+                prop: name,
+                value: val,
+              })
+              container.append(decl)
+            })
+          root.append(container)
+        }
+      }
+    },
   }
+}
 
-  plugin.setVariables = setVariables
+plugin.postcss = true
 
-  return plugin
-})
+export default plugin
